@@ -1,0 +1,65 @@
+---
+title: "Mapping Median Household Income by Tract in Northern Virginia"
+output: html_document
+---
+
+
+## Introduction
+
+
+
+```{r warning=FALSE, message=FALSE}
+library(acs) #Package for pulling ACS Data
+library(leaflet) #Map Rendering
+library(tigris) #download and subset shapefile form Census
+library(dplyr)  #Data manipulation
+library(stringr) #string manipulation
+```
+
+## Getting Median Income Data
+
+We will get median household income data by tract from the United States Census Bureau, in particular, their information rich American Community Survey (ACS). The American Community Survey is a massive household survey that collects demographic and housing information and produces very detailed population information. For more information you can go to the [ACS website here](https://www.census.gov/programs-surveys/acs).
+
+To gain access to the ACS data, we will use the **acs** package to query and pull ACS statistics. Before you can use the package, you must sign up for a key to use the Census Bureau's API. [Sign up for a Census API key here](https://api.census.gov/data/key_signup.html).
+
+Once we have a key, we register the key with the package using the `api.key.install` package as below.
+
+```{r pressure, echo=FALSE}
+#Census API Key, I included mine so you can try it out
+#but you can get one of your own at their website
+
+api.key<-"b98ceba64357dca514cb348213844e8719f901e6"
+
+#Register Your API key with the package
+api.key.install(key=api.key)
+```
+
+Our next task will be to select the geographies we are interested in getting statistics for. To find geographies, you can look online for State/County 'Federal Information Processing Standard Publication' (FIPS for short) codes. You can also use the `geo.lookup` function provided by the **acs** package. Below is an example of some of the counties/cities I am particularly interested in. 
+
+
+```{r}
+#First What Geographies do we want?
+#Lets pull a few counties of interest from VA
+geo.lookup(state="VA",county=c(13,59,510,600))
+```
+
+Once I know what counties I want from Northern Virginia, I can grab all tracts within these counties/cities using the `geo.make` function with the counties above and submitting the wildcard to the **tract** argument of the function. 
+
+```{r message=FALSE}
+#Create Geography Object you Want to Pull
+my.geo <- geo.make(state="VA",county=c(13,59,510,600),tract="*")
+
+```
+
+# Getting Our Geographic Boundaries
+
+To create our map, we will use the **tigris** package. The tigris package will once again connect to the Census Bureau's website. This time, however we will use it to grab shape files containing the geographic boundaries and map information necessary for plotting. We will then merge the information we grabbed in the previous section to plot it.
+
+We can grab the boundaries of interest using the **tigris** package's `tracts` function. This function will take a state and a set of county FIPS codes as arguments. It will then return a Spatial Polygons Data Frame that we can plot. Below, we submit the code to get the information we need for the FIPS codes of interest
+
+```{r message=FALSE, warning=FALSE}
+#download and create shapefile for Arlington, Fairfax and Alexandria
+nova.shape < -tracts(state="VA",county=c("013","059","510","600") )
+```
+
+
