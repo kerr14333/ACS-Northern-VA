@@ -20,7 +20,7 @@ require(stringr) #string manipulation
 #Census API Key, I included mine so you can try it out
 #but you can get one of your own at their website
 
-#api.key<-"YOUR KEY HERE"
+api.key<-"b98ceba64357dca514cb348213844e8719f901e6"
 
 #Register Your API key with the package
 api.key.install(key=api.key)
@@ -71,7 +71,7 @@ plot(nova.shape)
 nova.shape2<-nova.shape
 
 ##Merge out income data onto the spatial dataset
-nova.shape2@data<-nova.shape@data %>% left_join(income_df,by="GEOID")
+nova.shape2@data<-nova.shape@data %>% left_join(income_df,by="GEOID") %>% filter(median_income>=0)
 
 
 

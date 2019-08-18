@@ -1,6 +1,11 @@
 ---
 title: "Mapping Median Household Income by Tract in Northern Virginia"
-output: html_document
+author: Chris Grieves
+date: 8/18/2019
+output:
+  prettydoc::html_pretty:
+    theme: tactile
+    highlight: github
 ---
 
 
@@ -24,11 +29,21 @@ To gain access to the ACS data, we will use the **acs** package to query and pul
 
 Once we have a key, we register the key with the package using the `api.key.install` package as below.
 
-```{r pressure, echo=FALSE}
+```{r include=FALSE}
 #Census API Key, I included mine so you can try it out
 #but you can get one of your own at their website
 
 api.key<-"b98ceba64357dca514cb348213844e8719f901e6"
+
+#Register Your API key with the package
+api.key.install(key=api.key)
+```
+
+```{r eval=FALSE}
+#Census API Key, I included mine so you can try it out
+#but you can get one of your own at their website
+
+api.key<-"You're API KEY HERE"
 
 #Register Your API key with the package
 api.key.install(key=api.key)
@@ -51,15 +66,158 @@ my.geo <- geo.make(state="VA",county=c(13,59,510,600),tract="*")
 
 ```
 
+# ACS Data
+
+The ACS contains a dizzying number of tabulations. So much that it can be frustrating to find exactly what you want
+
+```{r cache=TRUE, warning=FALSE, eval = FALSE, echo = FALSE}
+#We know what geographies we want, but now what data do we want?
+#This took some drilling down to find
+acs.lookup(endyear=2014, table.number = "B19113", keyword = "Median family income")
+```
+
+
+
+```{r cache=TRUE, warning=FALSE}
+#Pull Data
+income_data<-acs.fetch(geography = my.geo,endyear = 2014,table.number="B19113")
+```
+
+Furthermore, we want to prepare this data to be linked to our Spatial Polygon Dataframe
+
+```{r cache=TRUE, warning=FALSE}
+#Create an object that we will later merge to our spatial data
+#NOTE: we need to pad the county FIPS code with 0's so it has width = 3
+income_df<- data.frame( GEOID = paste0(income_data@geography$state,
+                                       str_pad(income_data@geography$county,
+                                               width=3,
+                                               side="left",
+                                               pad="0"),
+                                       income_data@geography$tract
+                                       ),
+                        median_income = as.numeric(income_data@estimate),
+                        row.names=NULL)
+
+```
+
+This variable is a concatenation of the state, county, and tract FIPS code. We can adjoin
+
 # Getting Our Geographic Boundaries
 
 To create our map, we will use the **tigris** package. The tigris package will once again connect to the Census Bureau's website. This time, however we will use it to grab shape files containing the geographic boundaries and map information necessary for plotting. We will then merge the information we grabbed in the previous section to plot it.
 
 We can grab the boundaries of interest using the **tigris** package's `tracts` function. This function will take a state and a set of county FIPS codes as arguments. It will then return a Spatial Polygons Data Frame that we can plot. Below, we submit the code to get the information we need for the FIPS codes of interest
 
-```{r message=FALSE, warning=FALSE}
+```{r error=FALSE, message=FALSE, warning=FALSE, results='hide', cache=TRUE}
 #download and create shapefile for Arlington, Fairfax and Alexandria
-nova.shape < -tracts(state="VA",county=c("013","059","510","600") )
+nova.shape <- tracts(state="VA",county=c("013","059","510","600") )
+```
+
+To preview what this looks like, we can simply use the plot function to view its contents
+
+```{r}
+#quick plot to see what it looks like
+plot(nova.shape)
+```
+
+Now that we have our geography, we want to be able to explore the spatial distribution of our ACS data. To do this, we need to adjoin our data to the Spatial Polygon Dataframe , `nova.shape`, somehow. Lucky for us, within the structure of this object is a dataframe relating data fields to their specific. 
+
+```{r}
+nova.shape@data %>% head()
+```
+
+You can see that this data frame holds a lot of geographic information, the tigris dataset also gives us nuggets such as land and water area in the tract as well (`ALAND` and `AWATER` variables respectively). We want to link our income data to this data set. We can do this by left joining our income data by the "GEOID" variable. 
+
+```{r, warning=FALSE}
+
+##Merge out income data onto the spatial dataset
+nova.shape@data<-nova.shape@data %>% 
+  left_join(income_df,by="GEOID") %>% 
+  filter(median_income>=0)
 ```
 
 
+
+# Leaflet Maps
+
+While it's nice to see the geographic boundaries, we want for the user to be able to explore the map. Leaflet maps are great for this. They are javascript based maps that allow the user to pan, zoomin, and click on map entities for more information. Luckily for us, the **leaflet** package in R allows use to do this with ease.
+
+
+To prepare for this, we need to make a color scale. I want dark colors to represent areas with higher median income, while lighting areas represent areas of lower median household income. The leaflet package provides us with the `colorNumeric` function that will create the gradient we want.
+
+```{r}
+### Create Color Pallete for Choropleth
+pal<-colorNumeric(palette = "Purples", 
+                   domain = NULL)
+```
+
+
+We also want to make the user to be able to click for more information. we do this by creating a snippet of HTML that will popup when the user clicks on an area for more information.
+
+```{r}
+#Create "on-click" popup information for out map
+# it simply will display the tract number and the
+#median income
+tract_popup <- paste0("<strong>Tract: </strong>", 
+                      nova.shape@data$TRACTCE,
+                      "<br><strong>",
+                      "Value", 
+                      ": </strong>",
+                      paste("$",format(nova.shape@data$median_income, big.mark=",",
+                                       trim=TRUE),sep=""))
+```
+
+
+It's finally the moment we have all been waiting for, it's time to create out map!!!
+
+* setView to the middle of Northern Virginia, I did this by looking for coordinates on google maps and a little trial and error before I got something I was content with
+* addProviderTiles - All tiles are is the 'map' in the backgrond of 
+* addPolygons - This is where all our work above pays off. This is the function that physiscally places our geographic information over the tiles.
+* addLegend - Finally, so people have some idea of what the color scale means, we place a legend.
+
+```{r eval=FALSE}
+#finally create map; view and zoom were set by trial and error
+leaflet() %>% setView(lng=-77.2876, 
+                         lat=38.8041, 
+                         zoom = 10) %>% 
+              #Add Map Tiles (the background map)
+              addProviderTiles("CartoDB.Positron") %>% 
+              #Add our Census Tracts and color them
+              #using our palette
+              #Also inclue pop-ups we created above
+              addPolygons(data = nova.shape,weight=1,color="#000000",
+                             fillColor=~pal((nova.shape@data$median_income)),
+                             fillOpacity = .6,
+                             popup=tract_popup) %>%
+               #finally include 
+              addLegend("bottomleft",
+                          pal=pal,
+                          values =nova.shape@data$median_income,
+                          title="Median Family Income",labFormat=labelFormat(prefix = "$"))
+```
+
+We finally submit the above code and VOILA! we have the map below.
+
+```{r echo=FALSE}
+#finally create map; view and zoom were set by trial and error
+leaflet() %>% setView(lng=-77.2876, 
+                         lat=38.8041, 
+                         zoom = 10) %>% 
+              #Add Map Tiles (the background map)
+              addProviderTiles("CartoDB.Positron") %>% 
+              #Add our Census Tracts and color them
+              #using our palette
+              #Also inclue pop-ups we created above
+              addPolygons(data = nova.shape,weight=1,color="#000000",
+                             fillColor=~pal((nova.shape@data$median_income)),
+                             fillOpacity = .6,
+                             popup=tract_popup) %>%
+               #finally include 
+              addLegend("bottomleft",
+                          pal=pal,
+                          values =nova.shape@data$median_income,
+                          title="Median Family Income",labFormat=labelFormat(prefix = "$"))
+```
+
+
+Not too bad right!
