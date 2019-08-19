@@ -1,5 +1,5 @@
 ---
-title: "Mapping Median Household Income by Tract in Northern Virginia"
+title: "Mapping Median Household Income by Census Tract in Northern Virginia"
 author: Chris Grieves
 date: 8/18/2019
 output:
@@ -12,8 +12,31 @@ output:
 ## Introduction
 
 
+Maps are a fun way to explore and learn spatial characteristics of data. With modern R packages, it is extremely easy to create and distribute these visualizations. One particular use of a map is to see how demographic/economic characteristics are spatially distributed across geographic regions. I was particularly interested in how median household income was spatially distributed across Northern Virginia, where I live. There is a wealth of demographic and economic data provided by the U.S. Census Bureau at very low geographies. My goal was to create a Leaflet map that allowed me to see the distribution via a color scale and to click on a Census Tract to see the numbers associated with that area. Below is a preview for you to try out before learning how to create the map.
+
+<br>
+
+
+```{r, echo=FALSE, fig.align='center'}
+
+readRDS("./map.rds")
+
+```
+
+<br>
+<br>
+
+I will go through the following steps to create my map:
+
+1. Get income data from American Community Survey (ACS) API using the **acs** package
+2. Download and subset shape file from U.S Census Bureau website via the **tigris** package.
+3. Join income data **dplyr** package.
+4. Finally, we create an interactive Leaflet map using the **leaflet** package.
+
+Let's get started by loading the necessary packages.
 
 ```{r warning=FALSE, message=FALSE}
+#Load Libraries
 library(acs) #Package for pulling ACS Data
 library(leaflet) #Map Rendering
 library(tigris) #download and subset shapefile form Census
@@ -21,13 +44,13 @@ library(dplyr)  #Data manipulation
 library(stringr) #string manipulation
 ```
 
-## Getting Median Income Data
+## Getting Median Income Data from the American Community Survey
 
-We will get median household income data by tract from the United States Census Bureau, in particular, their information rich American Community Survey (ACS). The American Community Survey is a massive household survey that collects demographic and housing information and produces very detailed population information. For more information you can go to the [ACS website here](https://www.census.gov/programs-surveys/acs).
+We will get our data from the United States Census Bureau API, in particular, the information rich American Community Survey (ACS). The American Community Survey is a massive household survey that collects demographic and housing information and produces very detailed population information. The dataset we will use is the ACS 2017 5-year dataset due to its richness. For more information you can go to the [ACS website here](https://www.census.gov/programs-surveys/acs).
 
-To gain access to the ACS data, we will use the **acs** package to query and pull ACS statistics. Before you can use the package, you must sign up for a key to use the Census Bureau's API. [Sign up for a Census API key here](https://api.census.gov/data/key_signup.html).
+To gain access to the ACS data, we will use the **acs** package to query and pull ACS statistics from the API. Before you can use the package, you must sign up for a key to use the API. [Sign up for a Census API key here](https://api.census.gov/data/key_signup.html).
 
-Once we have a key, we register the key with the package using the `api.key.install` package as below.
+Once we have a key, we register the key with the **acs** package using the `api.key.install` package as below.
 
 ```{r include=FALSE}
 #Census API Key, I included mine so you can try it out
@@ -49,7 +72,7 @@ api.key<-"You're API KEY HERE"
 api.key.install(key=api.key)
 ```
 
-Our next task will be to select the geographies we are interested in getting statistics for. To find geographies, you can look online for State/County 'Federal Information Processing Standard Publication' (FIPS for short) codes. You can also use the `geo.lookup` function provided by the **acs** package. Below is an example of some of the counties/cities I am particularly interested in. 
+Our next task will be to select the geographies we are interested in, for our purpose this will be Census Tracts. To find geographies, you can look google search for State/County FIPS codes, or you can use the `geo.lookup` function provided by the **acs** package. Below is an example of some of the counties/cities I am particularly interested in. 
 
 
 ```{r}
@@ -58,7 +81,7 @@ Our next task will be to select the geographies we are interested in getting sta
 geo.lookup(state="VA",county=c(13,59,510,600))
 ```
 
-Once I know what counties I want from Northern Virginia, I can grab all tracts within these counties/cities using the `geo.make` function with the counties above and submitting the wildcard to the **tract** argument of the function. 
+Once I know what county FIPS I want, I can grab all Census Tracts within these counties/cities using the `geo.make` function with the list above and submitting the wildcard to the **tract** argument of the function. We will the returned object to the API to get information from the desired geographies.
 
 ```{r message=FALSE}
 #Create Geography Object you Want to Pull
@@ -66,24 +89,16 @@ my.geo <- geo.make(state="VA",county=c(13,59,510,600),tract="*")
 
 ```
 
-# ACS Data
 
-The ACS contains a dizzying number of tabulations. So much that it can be frustrating to find exactly what you want
-
-```{r cache=TRUE, warning=FALSE, eval = FALSE, echo = FALSE}
-#We know what geographies we want, but now what data do we want?
-#This took some drilling down to find
-acs.lookup(endyear=2014, table.number = "B19113", keyword = "Median family income")
-```
-
+The ACS contains a dizzying number of tabulations. So much that it can be frustrating to find exactly what you want. I have found that the [Census Reporter website](https://censusreporter.org/topics/table-codes/) provides the best interface for looking up what table numbers you want. You can search via keywords in the upper right hand corner of the website. Searching for **Median Household Income** yields that the table I am interested in is "B19013". I also supply my geography object to only pull the areas I am interested in. 
 
 
 ```{r cache=TRUE, warning=FALSE}
 #Pull Data
-income_data<-acs.fetch(geography = my.geo,endyear = 2014,table.number="B19113")
+income_data<-acs.fetch(geography = my.geo,endyear = 2017,table.number="B19013")
 ```
 
-Furthermore, we want to prepare this data to be linked to our Spatial Polygon Dataframe
+Furthermore, we want to prepare this data to be linked to our Spatial Polygon Dataframe. I create a GEOID variable to link to the spatial dataset. This variable is a concatenation of the state, county, and tract FIPS code. We also make a variable named "median_income" holding the estimate of median household income.
 
 ```{r cache=TRUE, warning=FALSE}
 #Create an object that we will later merge to our spatial data
@@ -100,33 +115,33 @@ income_df<- data.frame( GEOID = paste0(income_data@geography$state,
 
 ```
 
-This variable is a concatenation of the state, county, and tract FIPS code. We can adjoin
 
-# Getting Our Geographic Boundaries
 
-To create our map, we will use the **tigris** package. The tigris package will once again connect to the Census Bureau's website. This time, however we will use it to grab shape files containing the geographic boundaries and map information necessary for plotting. We will then merge the information we grabbed in the previous section to plot it.
+## Getting Our Geographic Boundaries
 
-We can grab the boundaries of interest using the **tigris** package's `tracts` function. This function will take a state and a set of county FIPS codes as arguments. It will then return a Spatial Polygons Data Frame that we can plot. Below, we submit the code to get the information we need for the FIPS codes of interest
+To get the shapes for our geographic areas, we will use the **tigris** package. The tigris package will connect to the Census Bureau's website, this time however, we will use it to grab shape files containing the geographic boundaries and map information necessary for plotting. We will then merge the information we grabbed in the previous section to it.
+
+We can grab the boundaries of interest using the **tigris** package's `tracts` function. This function will take a state and a set of county FIPS codes as arguments and return a Spatial Polygons Data Frame with the shapes of all Census Tracts in the desired areas. 
 
 ```{r error=FALSE, message=FALSE, warning=FALSE, results='hide', cache=TRUE}
 #download and create shapefile for Arlington, Fairfax and Alexandria
 nova.shape <- tracts(state="VA",county=c("013","059","510","600") )
 ```
 
-To preview what this looks like, we can simply use the plot function to view its contents
+We can preview our map simply using the plot function to view its contents
 
 ```{r}
 #quick plot to see what it looks like
 plot(nova.shape)
 ```
 
-Now that we have our geography, we want to be able to explore the spatial distribution of our ACS data. To do this, we need to adjoin our data to the Spatial Polygon Dataframe , `nova.shape`, somehow. Lucky for us, within the structure of this object is a dataframe relating data fields to their specific. 
+Now that we have our geography, we want to be able to explore the spatial distribution of our ACS data. To do this, we need to join our data to the Spatial Polygon Dataframe `nova.shape`. Contained within the Spatial Polygon Dataframe is a data.frame containing data about the polygons (tracts) we downloaded. We can preview this by using the @ sign to access this data.frame. We look at the head of the object below. 
 
 ```{r}
 nova.shape@data %>% head()
 ```
 
-You can see that this data frame holds a lot of geographic information, the tigris dataset also gives us nuggets such as land and water area in the tract as well (`ALAND` and `AWATER` variables respectively). We want to link our income data to this data set. We can do this by left joining our income data by the "GEOID" variable. 
+You can see that this data frame holds a lot of geographic information, the tigris dataset also gives us nuggets such as land and water area in the tract as well ("ALAND" and "AWATER" variables respectively). We want to link our income data to this data set. We can do this by left joining our income data by the "GEOID" variable. 
 
 ```{r, warning=FALSE}
 
@@ -138,9 +153,9 @@ nova.shape@data<-nova.shape@data %>%
 
 
 
-# Leaflet Maps
+## Leaflet Maps
 
-While it's nice to see the geographic boundaries, we want for the user to be able to explore the map. Leaflet maps are great for this. They are javascript based maps that allow the user to pan, zoomin, and click on map entities for more information. Luckily for us, the **leaflet** package in R allows use to do this with ease.
+While it's nice to see the geographic boundaries, we want for the user to be able to explore the map. Leaflet maps are great for this. They are javascript based maps that allow the user to pan, zoom, and click on map entities for more information. Luckily for us, the **leaflet** package in R allows use to do this with ease.
 
 
 To prepare for this, we need to make a color scale. I want dark colors to represent areas with higher median income, while lighting areas represent areas of lower median household income. The leaflet package provides us with the `colorNumeric` function that will create the gradient we want.
@@ -170,10 +185,10 @@ tract_popup <- paste0("<strong>Tract: </strong>",
 
 It's finally the moment we have all been waiting for, it's time to create out map!!!
 
-* setView to the middle of Northern Virginia, I did this by looking for coordinates on google maps and a little trial and error before I got something I was content with
-* addProviderTiles - All tiles are is the 'map' in the backgrond of 
-* addPolygons - This is where all our work above pays off. This is the function that physiscally places our geographic information over the tiles.
-* addLegend - Finally, so people have some idea of what the color scale means, we place a legend.
+* **setView** to the middle of Northern Virginia, I did this by looking for coordinates on google maps and a little trial and error before I got something I was content with
+* **addProviderTiles** - Tiles are the "background" picture in the map. We use the CartoDB.Positron tiles since they look nice and arent distracting. 
+* **addPolygons** - This is where all our work above pays off. This is the function that physiscally places our geographic information over the tiles.
+* **addLegend** - Finally, so people have some idea of what the color scale means, we place a legend on our map.
 
 ```{r eval=FALSE}
 #finally create map; view and zoom were set by trial and error
@@ -219,5 +234,10 @@ leaflet() %>% setView(lng=-77.2876,
                           title="Median Family Income",labFormat=labelFormat(prefix = "$"))
 ```
 
+<br>
 
 Not too bad right!
+
+<br>
+<br>
+<br>
